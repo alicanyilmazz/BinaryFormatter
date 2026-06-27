@@ -1,0 +1,6 @@
+@BinaryFormatter_HostAddress = http://localhost:5164
+
+GET {{BinaryFormatter_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
