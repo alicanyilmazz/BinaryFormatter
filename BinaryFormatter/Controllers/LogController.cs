@@ -35,7 +35,7 @@ public sealed class LogController : ControllerBase
 
             object? data = DumpValue(
                 value: rootRecord,
-                visitedRecords: new HashSet<string>(),
+                visitedRecordIds: new HashSet<SerializationRecordId>(),
                 depth: 0);
 
             return Ok(new
@@ -59,13 +59,13 @@ public sealed class LogController : ControllerBase
 
     private static object? DumpValue(
         object? value,
-        HashSet<string> visitedRecords,
+        HashSet<SerializationRecordId> visitedRecordIds,
         int depth)
     {
         if (value is null)
             return null;
 
-        if (depth > 50)
+        if (depth > 80)
             return "<max-depth>";
 
         if (IsSimpleValue(value))
@@ -78,20 +78,20 @@ public sealed class LogController : ControllerBase
             return primitiveRecord.Value;
 
         if (value is ClassRecord classRecord)
-            return DumpClassRecord(classRecord, visitedRecords, depth);
+            return DumpClassRecord(classRecord, visitedRecordIds, depth);
 
         if (value is ArrayRecord arrayRecord)
-            return DumpArrayRecord(arrayRecord, visitedRecords, depth);
+            return DumpArrayRecord(arrayRecord, visitedRecordIds, depth);
 
         if (value is Array runtimeArray)
-            return DumpRuntimeArray(runtimeArray, visitedRecords, depth);
+            return DumpRuntimeArray(runtimeArray, visitedRecordIds, depth);
 
         if (value is SerializationRecord serializationRecord)
         {
             return new Dictionary<string, object?>
             {
-                ["$id"] = serializationRecord.Id.ToString(),
                 ["$recordType"] = serializationRecord.RecordType.ToString(),
+                ["$runtimeRecordType"] = serializationRecord.GetType().FullName,
                 ["$type"] = serializationRecord.TypeName.AssemblyQualifiedName
             };
         }
@@ -101,30 +101,23 @@ public sealed class LogController : ControllerBase
 
     private static object DumpClassRecord(
         ClassRecord classRecord,
-        HashSet<string> visitedRecords,
+        HashSet<SerializationRecordId> visitedRecordIds,
         int depth)
     {
-        string recordId = classRecord.Id.ToString();
-
-        if (!string.IsNullOrWhiteSpace(recordId))
+        if (!visitedRecordIds.Add(classRecord.Id))
         {
-            if (!visitedRecords.Add(recordId))
+            return new Dictionary<string, object?>
             {
-                return new Dictionary<string, object?>
-                {
-                    ["$ref"] = recordId,
-                    ["$type"] = classRecord.TypeName.AssemblyQualifiedName
-                };
-            }
+                ["$ref"] = classRecord.TypeName.AssemblyQualifiedName
+            };
         }
 
         string[] memberNames = classRecord.MemberNames.ToArray();
 
         var result = new Dictionary<string, object?>
         {
-            ["$id"] = recordId,
-            ["$runtimeRecordType"] = classRecord.GetType().FullName,
             ["$recordType"] = classRecord.RecordType.ToString(),
+            ["$runtimeRecordType"] = classRecord.GetType().FullName,
             ["$type"] = classRecord.TypeName.AssemblyQualifiedName,
             ["$memberCount"] = memberNames.Length
         };
@@ -132,6 +125,7 @@ public sealed class LogController : ControllerBase
         foreach (string memberName in memberNames)
         {
             string displayName = NormalizeMemberName(memberName);
+            displayName = MakeUniqueKey(result, displayName);
 
             try
             {
@@ -139,7 +133,7 @@ public sealed class LogController : ControllerBase
 
                 result[displayName] = DumpValue(
                     rawValue,
-                    visitedRecords,
+                    visitedRecordIds,
                     depth + 1);
             }
             catch (Exception ex)
@@ -153,9 +147,17 @@ public sealed class LogController : ControllerBase
 
     private static object DumpArrayRecord(
         ArrayRecord arrayRecord,
-        HashSet<string> visitedRecords,
+        HashSet<SerializationRecordId> visitedRecordIds,
         int depth)
     {
+        if (!visitedRecordIds.Add(arrayRecord.Id))
+        {
+            return new Dictionary<string, object?>
+            {
+                ["$ref"] = arrayRecord.TypeName.AssemblyQualifiedName
+            };
+        }
+
         int[] lengths = arrayRecord.Lengths.ToArray();
 
         long totalLength = 1;
@@ -167,14 +169,14 @@ public sealed class LogController : ControllerBase
 
         var result = new Dictionary<string, object?>
         {
-            ["$id"] = arrayRecord.Id.ToString(),
             ["$recordType"] = arrayRecord.RecordType.ToString(),
+            ["$runtimeRecordType"] = arrayRecord.GetType().FullName,
             ["$type"] = arrayRecord.TypeName.AssemblyQualifiedName,
             ["$rank"] = arrayRecord.Rank,
             ["$lengths"] = lengths
         };
 
-        const int maxArrayItems = 1000;
+        const int maxArrayItems = 5000;
 
         if (totalLength > maxArrayItems)
         {
@@ -190,14 +192,17 @@ public sealed class LogController : ControllerBase
             return result;
         }
 
-        result["$items"] = DumpRuntimeArray(array, visitedRecords, depth + 1);
+        result["$items"] = DumpRuntimeArray(
+            array,
+            visitedRecordIds,
+            depth + 1);
 
         return result;
     }
 
     private static object DumpRuntimeArray(
         Array array,
-        HashSet<string> visitedRecords,
+        HashSet<SerializationRecordId> visitedRecordIds,
         int depth)
     {
         if (array is byte[] byteArray)
@@ -207,7 +212,10 @@ public sealed class LogController : ControllerBase
 
         foreach (object? item in array)
         {
-            list.Add(DumpValue(item, visitedRecords, depth + 1));
+            list.Add(DumpValue(
+                item,
+                visitedRecordIds,
+                depth + 1));
         }
 
         return list;
@@ -219,8 +227,7 @@ public sealed class LogController : ControllerBase
         {
             Type runtimeType = arrayRecord.GetType();
 
-            // SZArrayRecord<T> için: GetArray(bool allowNulls = true)
-            MethodInfo? szArrayGetArray = runtimeType
+            MethodInfo? getArrayBoolMethod = runtimeType
                 .GetMethods(BindingFlags.Instance | BindingFlags.Public)
                 .FirstOrDefault(method =>
                 {
@@ -233,46 +240,60 @@ public sealed class LogController : ControllerBase
                            parameters[0].ParameterType == typeof(bool);
                 });
 
-            if (szArrayGetArray is not null)
+            if (getArrayBoolMethod is not null)
             {
-                return szArrayGetArray.Invoke(
+                return getArrayBoolMethod.Invoke(
                     arrayRecord,
                     new object[] { true }) as Array;
             }
 
-            // Bazı sürümlerde parametresiz olabilir.
-            MethodInfo? parameterlessGetArray = runtimeType.GetMethod(
+            MethodInfo? getArrayEmptyMethod = runtimeType.GetMethod(
                 "GetArray",
                 BindingFlags.Instance | BindingFlags.Public,
                 binder: null,
                 types: Type.EmptyTypes,
                 modifiers: null);
 
-            if (parameterlessGetArray is not null)
+            if (getArrayEmptyMethod is not null)
             {
-                return parameterlessGetArray.Invoke(arrayRecord, null) as Array;
+                return getArrayEmptyMethod.Invoke(arrayRecord, null) as Array;
             }
 
-            // Multi-dimensional veya jagged array için expected array type gerekir.
-            Type? expectedArrayType = ResolveKnownArrayType(
-                arrayRecord.TypeName.AssemblyQualifiedName);
-
-            if (expectedArrayType is null)
-                return null;
-
-            MethodInfo? getArrayWithType = typeof(ArrayRecord).GetMethod(
+            MethodInfo? getArrayWithTypeMethod = typeof(ArrayRecord).GetMethod(
                 "GetArray",
                 BindingFlags.Instance | BindingFlags.Public,
                 binder: null,
                 types: new[] { typeof(Type), typeof(bool) },
                 modifiers: null);
 
-            if (getArrayWithType is null)
+            if (getArrayWithTypeMethod is null)
                 return null;
 
-            return getArrayWithType.Invoke(
-                arrayRecord,
-                new object[] { expectedArrayType, true }) as Array;
+            Type[] candidateArrayTypes =
+            {
+                ResolveKnownArrayType(arrayRecord.TypeName.AssemblyQualifiedName) ?? typeof(object[]),
+                typeof(SerializationRecord[]),
+                typeof(object[])
+            };
+
+            foreach (Type candidateArrayType in candidateArrayTypes.Distinct())
+            {
+                try
+                {
+                    Array? array = getArrayWithTypeMethod.Invoke(
+                        arrayRecord,
+                        new object[] { candidateArrayType, true }) as Array;
+
+                    if (array is not null)
+                        return array;
+                }
+                catch
+                {
+                    // Diğer candidate type'ı dene.
+                }
+            }
+
+            return null;
         }
         catch
         {
@@ -290,6 +311,9 @@ public sealed class LogController : ControllerBase
 
         if (assemblyQualifiedName.Contains("System.String[]"))
             return typeof(string[]);
+
+        if (assemblyQualifiedName.Contains("System.Int16[]"))
+            return typeof(short[]);
 
         if (assemblyQualifiedName.Contains("System.Int32[]"))
             return typeof(int[]);
@@ -332,17 +356,37 @@ public sealed class LogController : ControllerBase
 
     private static string NormalizeMemberName(string memberName)
     {
-        if (memberName.StartsWith("<") &&
-            memberName.Contains(">k__BackingField"))
+        int startIndex = memberName.LastIndexOf('<');
+        int endIndex = memberName.IndexOf(">k__BackingField", StringComparison.Ordinal);
+
+        if (startIndex >= 0 && endIndex > startIndex)
         {
-            int endIndex = memberName.IndexOf('>');
-            return memberName.Substring(1, endIndex - 1);
+            return memberName.Substring(
+                startIndex + 1,
+                endIndex - startIndex - 1);
         }
 
         if (memberName.StartsWith("_") && memberName.Length > 1)
             return memberName[1..];
 
         return memberName;
+    }
+
+    private static string MakeUniqueKey(
+        Dictionary<string, object?> dictionary,
+        string key)
+    {
+        if (!dictionary.ContainsKey(key))
+            return key;
+
+        int counter = 2;
+
+        while (dictionary.ContainsKey($"{key}_{counter}"))
+        {
+            counter++;
+        }
+
+        return $"{key}_{counter}";
     }
 
     private static bool TryHexToBytes(string? hex, out byte[] bytes)
