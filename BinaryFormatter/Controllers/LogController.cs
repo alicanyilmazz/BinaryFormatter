@@ -118,21 +118,29 @@ public sealed class LogController : ControllerBase
             }
         }
 
+        string[] memberNames = classRecord.MemberNames.ToArray();
+
         var result = new Dictionary<string, object?>
         {
             ["$id"] = recordId,
+            ["$runtimeRecordType"] = classRecord.GetType().FullName,
             ["$recordType"] = classRecord.RecordType.ToString(),
-            ["$type"] = classRecord.TypeName.AssemblyQualifiedName
+            ["$type"] = classRecord.TypeName.AssemblyQualifiedName,
+            ["$memberCount"] = memberNames.Length
         };
 
-        foreach (string memberName in classRecord.MemberNames)
+        foreach (string memberName in memberNames)
         {
             string displayName = NormalizeMemberName(memberName);
 
             try
             {
                 object? rawValue = classRecord.GetRawValue(memberName);
-                result[displayName] = DumpValue(rawValue, visitedRecords, depth + 1);
+
+                result[displayName] = DumpValue(
+                    rawValue,
+                    visitedRecords,
+                    depth + 1);
             }
             catch (Exception ex)
             {
@@ -211,6 +219,28 @@ public sealed class LogController : ControllerBase
         {
             Type runtimeType = arrayRecord.GetType();
 
+            // SZArrayRecord<T> için: GetArray(bool allowNulls = true)
+            MethodInfo? szArrayGetArray = runtimeType
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .FirstOrDefault(method =>
+                {
+                    if (method.Name != "GetArray")
+                        return false;
+
+                    ParameterInfo[] parameters = method.GetParameters();
+
+                    return parameters.Length == 1 &&
+                           parameters[0].ParameterType == typeof(bool);
+                });
+
+            if (szArrayGetArray is not null)
+            {
+                return szArrayGetArray.Invoke(
+                    arrayRecord,
+                    new object[] { true }) as Array;
+            }
+
+            // Bazı sürümlerde parametresiz olabilir.
             MethodInfo? parameterlessGetArray = runtimeType.GetMethod(
                 "GetArray",
                 BindingFlags.Instance | BindingFlags.Public,
@@ -223,6 +253,7 @@ public sealed class LogController : ControllerBase
                 return parameterlessGetArray.Invoke(arrayRecord, null) as Array;
             }
 
+            // Multi-dimensional veya jagged array için expected array type gerekir.
             Type? expectedArrayType = ResolveKnownArrayType(
                 arrayRecord.TypeName.AssemblyQualifiedName);
 
