@@ -6,7 +6,7 @@ namespace App.Parser.Controllers;
 
 [ApiController]
 [Route("[controller]")]
-public class LogController : ControllerBase
+public sealed class LogController : ControllerBase
 {
     private readonly ILogger<LogController> _logger;
 
@@ -29,16 +29,19 @@ public class LogController : ControllerBase
                 });
             }
 
-            using var stream = new MemoryStream(bytes);
+            using var stream = new MemoryStream(bytes, writable: false);
 
-            SerializationRecord record = NrbfDecoder.Decode(stream);
+            SerializationRecord rootRecord = NrbfDecoder.Decode(stream);
 
-            object? result = DumpValue(record, new HashSet<string>(), 0);
+            object? data = DumpValue(
+                value: rootRecord,
+                visitedRecords: new HashSet<string>(),
+                depth: 0);
 
             return Ok(new
             {
                 success = true,
-                data = result
+                data
             });
         }
         catch (Exception ex)
@@ -65,51 +68,23 @@ public class LogController : ControllerBase
         if (depth > 50)
             return "<max-depth>";
 
-        if (value is string ||
-            value is bool ||
-            value is byte ||
-            value is sbyte ||
-            value is short ||
-            value is ushort ||
-            value is int ||
-            value is uint ||
-            value is long ||
-            value is ulong ||
-            value is float ||
-            value is double ||
-            value is decimal ||
-            value is char ||
-            value is DateTime ||
-            value is TimeSpan ||
-            value is Guid)
-        {
+        if (IsSimpleValue(value))
             return value;
-        }
 
         if (value is byte[] byteArray)
-        {
             return "0x" + Convert.ToHexString(byteArray);
-        }
 
         if (value is PrimitiveTypeRecord primitiveRecord)
-        {
             return primitiveRecord.Value;
-        }
 
         if (value is ClassRecord classRecord)
-        {
             return DumpClassRecord(classRecord, visitedRecords, depth);
-        }
 
         if (value is ArrayRecord arrayRecord)
-        {
             return DumpArrayRecord(arrayRecord, visitedRecords, depth);
-        }
 
         if (value is Array runtimeArray)
-        {
             return DumpRuntimeArray(runtimeArray, visitedRecords, depth);
-        }
 
         if (value is SerializationRecord serializationRecord)
         {
@@ -161,7 +136,7 @@ public class LogController : ControllerBase
             }
             catch (Exception ex)
             {
-                result[displayName] = $"<read-error: {ex.GetType().Name}>";
+                result[displayName] = $"<read-error: {ex.GetType().Name} - {ex.Message}>";
             }
         }
 
@@ -218,9 +193,7 @@ public class LogController : ControllerBase
         int depth)
     {
         if (array is byte[] byteArray)
-        {
             return "0x" + Convert.ToHexString(byteArray);
-        }
 
         var list = new List<object?>();
 
@@ -236,31 +209,39 @@ public class LogController : ControllerBase
     {
         try
         {
-            Type type = arrayRecord.GetType();
+            Type runtimeType = arrayRecord.GetType();
 
-            // SZArrayRecord<T> için: GetArray()
-            MethodInfo? parameterlessGetArray = type.GetMethod(
+            MethodInfo? parameterlessGetArray = runtimeType.GetMethod(
                 "GetArray",
-                Type.EmptyTypes);
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
 
             if (parameterlessGetArray is not null)
             {
                 return parameterlessGetArray.Invoke(arrayRecord, null) as Array;
             }
 
-            // ArrayRecord için: GetArray(Type expectedArrayType, bool allowNulls)
-            MethodInfo? typedGetArray = type.GetMethod(
+            Type? expectedArrayType = ResolveKnownArrayType(
+                arrayRecord.TypeName.AssemblyQualifiedName);
+
+            if (expectedArrayType is null)
+                return null;
+
+            MethodInfo? getArrayWithType = typeof(ArrayRecord).GetMethod(
                 "GetArray",
-                new[] { typeof(Type), typeof(bool) });
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types: new[] { typeof(Type), typeof(bool) },
+                modifiers: null);
 
-            if (typedGetArray is not null)
-            {
-                return typedGetArray.Invoke(
-                    arrayRecord,
-                    new object[] { typeof(object[]), true }) as Array;
-            }
+            if (getArrayWithType is null)
+                return null;
 
-            return null;
+            return getArrayWithType.Invoke(
+                arrayRecord,
+                new object[] { expectedArrayType, true }) as Array;
         }
         catch
         {
@@ -268,9 +249,58 @@ public class LogController : ControllerBase
         }
     }
 
+    private static Type? ResolveKnownArrayType(string? assemblyQualifiedName)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyQualifiedName))
+            return null;
+
+        if (assemblyQualifiedName.Contains("System.Byte[]"))
+            return typeof(byte[]);
+
+        if (assemblyQualifiedName.Contains("System.String[]"))
+            return typeof(string[]);
+
+        if (assemblyQualifiedName.Contains("System.Int32[]"))
+            return typeof(int[]);
+
+        if (assemblyQualifiedName.Contains("System.Int64[]"))
+            return typeof(long[]);
+
+        if (assemblyQualifiedName.Contains("System.Decimal[]"))
+            return typeof(decimal[]);
+
+        if (assemblyQualifiedName.Contains("System.Boolean[]"))
+            return typeof(bool[]);
+
+        if (assemblyQualifiedName.Contains("System.DateTime[]"))
+            return typeof(DateTime[]);
+
+        return Type.GetType(assemblyQualifiedName, throwOnError: false);
+    }
+
+    private static bool IsSimpleValue(object value)
+    {
+        return value is string
+            or bool
+            or byte
+            or sbyte
+            or short
+            or ushort
+            or int
+            or uint
+            or long
+            or ulong
+            or float
+            or double
+            or decimal
+            or char
+            or DateTime
+            or TimeSpan
+            or Guid;
+    }
+
     private static string NormalizeMemberName(string memberName)
     {
-        // <AccountNumber>k__BackingField -> AccountNumber
         if (memberName.StartsWith("<") &&
             memberName.Contains(">k__BackingField"))
         {
@@ -278,11 +308,8 @@ public class LogController : ControllerBase
             return memberName.Substring(1, endIndex - 1);
         }
 
-        // _accountNumber -> accountNumber
         if (memberName.StartsWith("_") && memberName.Length > 1)
-        {
             return memberName[1..];
-        }
 
         return memberName;
     }
@@ -299,9 +326,7 @@ public class LogController : ControllerBase
             hex = hex.Trim();
 
             if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            {
                 hex = hex[2..];
-            }
 
             hex = hex
                 .Replace(" ", "")
@@ -327,7 +352,7 @@ public class LogController : ControllerBase
     }
 }
 
-public class BinaryFormatterRequest
+public sealed class BinaryFormatterRequest
 {
     public string Data { get; set; } = string.Empty;
 }
