@@ -1,38 +1,66 @@
-# BinaryFormatter
+SET NOCOUNT ON;
 
-SELECT
-    'IF NOT EXISTS
+DECLARE @TERMINAL_ID VARCHAR(10);
+DECLARE @GROUP_CODE VARCHAR(50) = '73889';
+DECLARE @TOP_COUNT INT = 1500;
+
+DECLARE CONVERSION_CURSOR CURSOR STATIC LOCAL FOR
+
+SELECT TOP (@TOP_COUNT)
+       T.TERMINAL_ID
+FROM ATM.ATM_TBL T WITH (NOLOCK)
+WHERE NOT EXISTS
 (
     SELECT 1
-    FROM ATM.ATM_GROUPS
-    WHERE GROUP_CODE = ''73889''
-      AND TERMINAL_ID = ''' + REPLACE(TERMINAL_ID, '''', '''''') + '''
+    FROM ATM.ATM_GROUPS G
+    WHERE G.GROUP_CODE = @GROUP_CODE
+      AND G.TERMINAL_ID = T.TERMINAL_ID
 )
+ORDER BY T.TERMINAL_ID;
+
+OPEN CONVERSION_CURSOR;
+
+FETCH NEXT FROM CONVERSION_CURSOR INTO @TERMINAL_ID;
+
+WHILE @@FETCH_STATUS = 0
 BEGIN
-    INSERT INTO ATM.ATM_GROUPS
-    (
-        LOG_SERIAL_NUMBER,
-        GROUP_CODE,
-        TERMINAL_ID,
-        UPDATING_CHANNEL_CODE,
-        UPDATING_TRAN_CODE,
-        UPDATING_USER_CODE,
-        UPDATE_DATE,
-        RECORD_STATUS
-    )
-    VALUES
-    (
-        0,
-        ''73889'',
-        ''' + REPLACE(TERMINAL_ID, '''', '''''') + ''',
-        ''DB.BULK_UPDATE'',
-        ''MNDSUP'',
-        ''ALICANYI'',
-        GETDATE(),
-        ''A''
-    );
+    BEGIN TRY
+
+        INSERT INTO ATM.ATM_GROUPS
+        (
+            LOG_SERIAL_NUMBER,
+            GROUP_CODE,
+            TERMINAL_ID,
+            UPDATING_CHANNEL_CODE,
+            UPDATING_TRAN_CODE,
+            UPDATING_USER_CODE,
+            UPDATE_DATE,
+            RECORD_STATUS
+        )
+        VALUES
+        (
+            0,
+            @GROUP_CODE,
+            @TERMINAL_ID,
+            'DB.BULK_UPDATE',
+            'MNDSUP',
+            'ALICANYI',
+            GETDATE(),
+            'A'
+        );
+
+    END TRY
+    BEGIN CATCH
+
+        PRINT 'TERMINAL: '
+            + ISNULL(@TERMINAL_ID, 'NULL')
+            + ' - ERROR: '
+            + ERROR_MESSAGE();
+
+    END CATCH;
+
+    FETCH NEXT FROM CONVERSION_CURSOR INTO @TERMINAL_ID;
 END;
-'
-AS INSERT_SCRIPT
-FROM ATM.ATM_TBL WITH (NOLOCK)
-ORDER BY TERMINAL_ID;
+
+CLOSE CONVERSION_CURSOR;
+DEALLOCATE CONVERSION_CURSOR;
