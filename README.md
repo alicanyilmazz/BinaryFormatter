@@ -1,193 +1,309 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
-
-private static readonly Dictionary<char, char> ArabicMap =
-    new Dictionary<char, char>
-    {
-        /*
-         * NDC Double Arabic mapping.
-         *
-         * Sol taraf  : Switch'ten gelen karakter
-         * Sağ taraf : Unicode Arabic karakter
-         *
-         * Dokümandaki mapping'in tamamını buraya ekle.
-         */
-
-        { '"',  'ا' },
-        { '#',  'ا' },
-        { '(',  'ت' },
-        { '8',  'ب' },
-        { '<',  'خ' },
-        { '@',  'ر' },
-
-        { 'C',  'س' },
-        { 'D',  'ش' },
-        { 'E',  'ص' },
-        { 'F',  'ض' },
-        { 'G',  'ط' },
-        { 'H',  'ظ' },
-
-        { 'I',  'ع' },
-        { 'J',  'ع' },
-
-        { 'K',  'غ' },
-        { 'L',  'غ' },
-
-        { 'M',  'ف' },
-
-        { 'N',  'ق' },
-        { 'O',  'ق' },
-
-        { 'P',  'ك' },
-        { 'Q',  'ك' },
-        { 'R',  'ك' },
-        { 'S',  'ك' },
-
-        { 'T',  'ل' },
-        { 'U',  'ل' },
-
-        { 'W',  'م' },
-        { 'X',  'م' },
-
-        { 'Y',  'ن' },
-        { 'Z',  'ن' },
-
-        { '[',  'و' },
-
-        // Bunları kendi dokümanındaki karşılıkla kontrol et.
-        { '\\', 'ة' },
-        { ']',  'ه' },
-
-        { '^',  'ي' },
-        { '_',  'ي' }
-
-        /*
-         * Buraya fotoğraftaki diğer special-character
-         * mappinglerini de aynı şekilde ekle:
-         *
-         * { '!',  '...' },
-         * { '$',  '...' },
-         * { '%',  '...' },
-         * { '&',  '...' },
-         * { '\'', '...' },
-         * { ')',  '...' },
-         * { '*',  '...' },
-         * ...
-         */
-    };
-
-
-private static string ConvertArabicHeader(string rawHeader)
+public class MappedTextConverter : ITextConverter
 {
-    if (string.IsNullOrEmpty(rawHeader))
-        return rawHeader;
-
-    var mapped = new StringBuilder(rawHeader.Length);
-
-    foreach (char character in rawHeader)
+    public string Convert(
+        string data,
+        IReadOnlyDictionary<char, string> characterMap,
+        TextConversionOptions options = null)
     {
-        char arabicCharacter;
+        if (string.IsNullOrEmpty(data))
+            return data;
 
-        if (ArabicMap.TryGetValue(character, out arabicCharacter))
+        if (characterMap == null)
+            throw new ArgumentNullException(nameof(characterMap));
+
+        if (options == null)
+            options = new TextConversionOptions();
+
+        List<TextRun> runs = CreateRuns(data, options);
+
+        /*
+         * Örneğin:
+         *
+         * ABC 20-02-26 DEF
+         *
+         * Reverse + Numeric Preserve:
+         *
+         * Run'lar:
+         * [ABC ]
+         * [20-02-26] -> Preserve
+         * [ DEF]
+         *
+         * Run sırası ters çevrilir ama numeric run'ın
+         * kendi karakter sırası korunur.
+         */
+        if (options.OrderMode == TextOrderMode.Reverse)
         {
-            mapped.Append(arabicCharacter);
+            runs.Reverse();
         }
-        else
+
+        var result = new StringBuilder();
+
+        foreach (TextRun run in runs)
         {
-            // Mapping yoksa karakteri kaybetme.
-            // Space, sayı, noktalama vb. aynen kalır.
-            mapped.Append(character);
+            if (options.OrderMode == TextOrderMode.Reverse &&
+                !run.PreserveOrder)
+            {
+                AppendReverseMapped(
+                    result,
+                    run.Value,
+                    characterMap,
+                    options);
+            }
+            else
+            {
+                AppendMapped(
+                    result,
+                    run.Value,
+                    characterMap,
+                    options);
+            }
         }
+
+        return result.ToString();
     }
 
-    /*
-     * NDC Double Arabic data visual order geliyor.
-     *
-     * Örnek:
-     *
-     * KU8XU"
-     *
-     * mapping sonrası:
-     *
-     * غلبملا
-     *
-     * reverse sonrası:
-     *
-     * المبلغ
-     */
-
-    char[] chars = mapped.ToString().ToCharArray();
-
-    Array.Reverse(chars);
-
-    string result = new string(chars);
-
-    /*
-     * Eğer header içerisinde sayı/date gibi LTR değerler
-     * bulunursa tüm header reverse edildiği için onlar da
-     * ters döner. Onları tekrar kendi yönüne çeviriyoruz.
-     *
-     * Örnek:
-     *
-     * 20-02-26
-     *
-     * reverse sonrası:
-     *
-     * 62-20-02
-     *
-     * RestoreNumericRuns sonrası:
-     *
-     * 20-02-26
-     */
-
-    return RestoreNumericRuns(result);
-}
-
-
-private static string RestoreNumericRuns(string value)
-{
-    if (string.IsNullOrEmpty(value))
-        return value;
-
-    char[] chars = value.ToCharArray();
-
-    int index = 0;
-
-    while (index < chars.Length)
+    private static List<TextRun> CreateRuns(
+        string data,
+        TextConversionOptions options)
     {
-        if (!char.IsDigit(chars[index]))
+        var runs = new List<TextRun>();
+
+        /*
+         * Hiçbir özel run korunmayacaksa
+         * tüm text tek run olarak yeterli.
+         */
+        if (options.PreserveRuns == PreserveRunType.None)
         {
-            index++;
-            continue;
+            runs.Add(new TextRun
+            {
+                Value = data,
+                PreserveOrder = false
+            });
+
+            return runs;
         }
 
-        int start = index;
+        var normalRun = new StringBuilder();
 
-        while (index < chars.Length &&
-               IsNumericCharacter(chars[index]))
+        int index = 0;
+
+        while (index < data.Length)
         {
+            /*
+             * Numeric preservation aktifse
+             * sayı/date/amount gibi bir alan yakalamaya çalış.
+             */
+            if (HasOption(
+                    options.PreserveRuns,
+                    PreserveRunType.Numeric) &&
+                IsNumericRunStart(data, index))
+            {
+                AddNormalRunIfExists(runs, normalRun);
+
+                int endIndex = ReadNumericRun(
+                    data,
+                    index,
+                    options.NumericSeparators);
+
+                string numericValue =
+                    data.Substring(index, endIndex - index);
+
+                runs.Add(new TextRun
+                {
+                    Value = numericValue,
+                    PreserveOrder = true
+                });
+
+                index = endIndex;
+                continue;
+            }
+
+            normalRun.Append(data[index]);
             index++;
         }
 
-        int length = index - start;
+        AddNormalRunIfExists(runs, normalRun);
 
-        if (length > 1)
+        return runs;
+    }
+
+    private static bool IsNumericRunStart(
+        string data,
+        int index)
+    {
+        if (index >= data.Length)
+            return false;
+
+        char character = data[index];
+
+        if (char.IsDigit(character))
+            return true;
+
+        /*
+         * Negatif veya pozitif sayı:
+         *
+         * -130.00
+         * +130.00
+         */
+        if ((character == '-' || character == '+') &&
+            index + 1 < data.Length &&
+            char.IsDigit(data[index + 1]))
         {
-            Array.Reverse(chars, start, length);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static int ReadNumericRun(
+        string data,
+        int startIndex,
+        string numericSeparators)
+    {
+        int index = startIndex;
+
+        /*
+         * Başında + veya - varsa dahil et.
+         */
+        if (index < data.Length &&
+            (data[index] == '+' || data[index] == '-'))
+        {
+            index++;
+        }
+
+        while (index < data.Length)
+        {
+            char character = data[index];
+
+            if (char.IsDigit(character))
+            {
+                index++;
+                continue;
+            }
+
+            if (IsNumericSeparator(
+                    character,
+                    numericSeparators) &&
+                index + 1 < data.Length &&
+                char.IsDigit(data[index + 1]))
+            {
+                index++;
+                continue;
+            }
+
+            break;
+        }
+
+        return index;
+    }
+
+    private static bool IsNumericSeparator(
+        char character,
+        string numericSeparators)
+    {
+        if (string.IsNullOrEmpty(numericSeparators))
+            return false;
+
+        return numericSeparators.IndexOf(character) >= 0;
+    }
+
+    private static void AddNormalRunIfExists(
+        List<TextRun> runs,
+        StringBuilder normalRun)
+    {
+        if (normalRun.Length == 0)
+            return;
+
+        runs.Add(new TextRun
+        {
+            Value = normalRun.ToString(),
+            PreserveOrder = false
+        });
+
+        normalRun.Clear();
+    }
+
+    private static void AppendMapped(
+        StringBuilder result,
+        string value,
+        IReadOnlyDictionary<char, string> characterMap,
+        TextConversionOptions options)
+    {
+        foreach (char character in value)
+        {
+            AppendCharacter(
+                result,
+                character,
+                characterMap,
+                options);
         }
     }
 
-    return new string(chars);
-}
+    private static void AppendReverseMapped(
+        StringBuilder result,
+        string value,
+        IReadOnlyDictionary<char, string> characterMap,
+        TextConversionOptions options)
+    {
+        for (int i = value.Length - 1; i >= 0; i--)
+        {
+            AppendCharacter(
+                result,
+                value[i],
+                characterMap,
+                options);
+        }
+    }
 
+    private static void AppendCharacter(
+        StringBuilder result,
+        char character,
+        IReadOnlyDictionary<char, string> characterMap,
+        TextConversionOptions options)
+    {
+        string mappedValue;
 
-private static bool IsNumericCharacter(char character)
-{
-    return char.IsDigit(character)
-           || character == '.'
-           || character == ','
-           || character == '-'
-           || character == '/'
-           || character == ':';
+        if (characterMap.TryGetValue(
+                character,
+                out mappedValue))
+        {
+            result.Append(mappedValue);
+            return;
+        }
+
+        switch (options.UnmappedCharacterBehavior)
+        {
+            case UnmappedCharacterBehavior.Keep:
+                result.Append(character);
+                break;
+
+            case UnmappedCharacterBehavior.Remove:
+                break;
+
+            case UnmappedCharacterBehavior.ThrowException:
+                throw new InvalidOperationException(
+                    string.Format(
+                        "Character mapping not found. Character: '{0}', Hex: 0x{1:X4}",
+                        character,
+                        (int)character));
+
+            default:
+                result.Append(character);
+                break;
+        }
+    }
+
+    private static bool HasOption(
+        PreserveRunType value,
+        PreserveRunType option)
+    {
+        return (value & option) == option;
+    }
+
+    private sealed class TextRun
+    {
+        public string Value { get; set; }
+
+        public bool PreserveOrder { get; set; }
+    }
 }
