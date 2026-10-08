@@ -1,57 +1,120 @@
-WITH PROD AS
-(
-    SELECT
-        MENU_NAME,
-        TRANSACTION_NAME,
-        TRANSACTION_EVENT_EXPRESSION
-    FROM [PROD_DB].[dbo].[MENU_TEMPLATE]
-    WHERE TEMPLATE_ID = 1
-),
-UAT AS
-(
-    SELECT
-        MENU_NAME,
-        TRANSACTION_NAME,
-        TRANSACTION_EVENT_EXPRESSION
-    FROM [UAT_DB].[dbo].[MENU_TEMPLATE]
-    WHERE TEMPLATE_ID = 1
-),
-DIFFERENCES AS
-(
-    SELECT
-        P.MENU_NAME,
-        P.TRANSACTION_NAME
-    FROM PROD P
-    INNER JOIN UAT U
-        ON U.MENU_NAME = P.MENU_NAME
-       AND U.TRANSACTION_NAME = P.TRANSACTION_NAME
-    WHERE ISNULL(P.TRANSACTION_EVENT_EXPRESSION, '') 
-       <> ISNULL(U.TRANSACTION_EVENT_EXPRESSION, '')
-)
+private static readonly Dictionary<char, char> ArabicMap =
+    new Dictionary<char, char>
+    {
+        // Bunlar elimizdeki örneklerden bildiklerimiz.
 
-SELECT
-    'PROD' AS ENVIRONMENT,
-    P.MENU_NAME,
-    P.TRANSACTION_NAME,
-    P.TRANSACTION_EVENT_EXPRESSION
-FROM PROD P
-INNER JOIN DIFFERENCES D
-    ON D.MENU_NAME = P.MENU_NAME
-   AND D.TRANSACTION_NAME = P.TRANSACTION_NAME
+        { '"', 'ا' },
+        { '#', 'ا' },
+        { '(', 'ت' },
+        { '8', 'ب' },
+        { '<', 'خ' },
+        { '@', 'ر' },
 
-UNION ALL
+        { 'I', 'ع' },
+        { 'J', 'ع' },
+        { 'K', 'غ' },
 
-SELECT
-    'UAT' AS ENVIRONMENT,
-    U.MENU_NAME,
-    U.TRANSACTION_NAME,
-    U.TRANSACTION_EVENT_EXPRESSION
-FROM UAT U
-INNER JOIN DIFFERENCES D
-    ON D.MENU_NAME = U.MENU_NAME
-   AND D.TRANSACTION_NAME = U.TRANSACTION_NAME
+        { 'U', 'ل' },
+        { 'X', 'م' },
+        { 'Z', 'ن' },
 
-ORDER BY
-    MENU_NAME,
-    TRANSACTION_NAME,
-    ENVIRONMENT;
+        { '[', 'و' },
+        { '\\', 'ة' },
+        { '_', 'ي' },
+
+        // ------------------------------------
+        // Dokümandaki geri kalan mappingleri
+        // buraya sen ekleyeceksin.
+        // ------------------------------------
+
+        // Örnek:
+        // { 'C', 'س' },
+        // { 'D', 'ش' },
+        // { 'E', 'ص' },
+        // { 'F', 'ض' },
+        // ...
+    };
+
+    private static string ConvertArabicHeader(string rawHeader)
+{
+    if (string.IsNullOrEmpty(rawHeader))
+        return rawHeader;
+
+    // NDC Arabic header visual order geliyor.
+    // Önce tamamını ters çeviriyoruz.
+    char[] chars = rawHeader.ToCharArray();
+    Array.Reverse(chars);
+
+    var result = new StringBuilder(chars.Length);
+
+    foreach (char c in chars)
+    {
+        char arabicChar;
+
+        if (ArabicMap.TryGetValue(c, out arabicChar))
+        {
+            result.Append(arabicChar);
+        }
+        else
+        {
+            // Space veya mapping'de olmayan bir şey geldiyse
+            // veri kaybolmasın, olduğu gibi bırak.
+            result.Append(c);
+        }
+    }
+
+    return result.ToString();
+}
+
+// Language
+string langCode = data.Substring(0, 2);
+
+bool isArabic = langCode.StartsWith(
+    "A",
+    StringComparison.OrdinalIgnoreCase);
+
+result.LanguageInfo =
+    langCode.StartsWith("E", StringComparison.OrdinalIgnoreCase)
+        ? "English"
+        : isArabic
+            ? "Arabic"
+            : "Unknown";
+
+string remaining = data.Substring(2);
+
+if (remaining.Length < LineLength)
+{
+    throw Commons.Common.GenerateHostException(
+        "HeaderLengthInsufficient",
+        false);
+}
+
+// Header
+string rawHeader = remaining.Substring(0, LineLength);
+
+result.HeaderRawData = isArabic
+    ? ConvertArabicHeader(rawHeader)
+    : rawHeader;
+
+
+// Transactions
+// Bunlara KESİNLİKLE Arabic conversion uygulanmıyor.
+
+string rowsBlock = remaining.Substring(LineLength);
+
+for (int i = 0;
+     i + LineLength <= rowsBlock.Length;
+     i += LineLength)
+{
+    string rawLine =
+        rowsBlock.Substring(i, LineLength);
+
+    if (string.IsNullOrWhiteSpace(rawLine))
+        continue;
+
+    result.Transactions.Add(
+        new OffusMiniStatementTransactions
+        {
+            RawData = rawLine
+        });
+}
