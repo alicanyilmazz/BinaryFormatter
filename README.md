@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
-
 public enum CharacterOrder
 {
     Keep = 0,
@@ -19,18 +15,50 @@ public interface ICharacterMappingConverter
 {
     string Convert(
         string data,
+        IReadOnlyDictionary<char, string> characterMap);
+
+    string Convert(
+        string data,
         IReadOnlyDictionary<char, string> characterMap,
-        CharacterOrder characterOrder = CharacterOrder.Keep,
-        UnmappedCharacterBehavior unmappedCharacterBehavior = UnmappedCharacterBehavior.Keep);
+        CharacterOrder characterOrder);
+
+    string Convert(
+        string data,
+        IReadOnlyDictionary<char, string> characterMap,
+        CharacterOrder characterOrder,
+        UnmappedCharacterBehavior unmappedCharacterBehavior);
 }
 
 public class CharacterMappingConverter : ICharacterMappingConverter
 {
     public string Convert(
         string data,
+        IReadOnlyDictionary<char, string> characterMap)
+    {
+        return Convert(
+            data,
+            characterMap,
+            CharacterOrder.Keep,
+            UnmappedCharacterBehavior.Keep);
+    }
+
+    public string Convert(
+        string data,
         IReadOnlyDictionary<char, string> characterMap,
-        CharacterOrder characterOrder = CharacterOrder.Keep,
-        UnmappedCharacterBehavior unmappedCharacterBehavior = UnmappedCharacterBehavior.Keep)
+        CharacterOrder characterOrder)
+    {
+        return Convert(
+            data,
+            characterMap,
+            characterOrder,
+            UnmappedCharacterBehavior.Keep);
+    }
+
+    public string Convert(
+        string data,
+        IReadOnlyDictionary<char, string> characterMap,
+        CharacterOrder characterOrder,
+        UnmappedCharacterBehavior unmappedCharacterBehavior)
     {
         if (string.IsNullOrEmpty(data))
             return data;
@@ -72,9 +100,7 @@ public class CharacterMappingConverter : ICharacterMappingConverter
         IReadOnlyDictionary<char, string> characterMap,
         UnmappedCharacterBehavior unmappedCharacterBehavior)
     {
-        string mappedValue;
-
-        if (characterMap.TryGetValue(character, out mappedValue))
+        if (characterMap.TryGetValue(character, out string mappedValue))
         {
             result.Append(mappedValue);
             return;
@@ -91,14 +117,13 @@ public class CharacterMappingConverter : ICharacterMappingConverter
 
             case UnmappedCharacterBehavior.ThrowException:
                 throw new InvalidOperationException(
-                    string.Format(
-                        "Character mapping not found. Character: '{0}', Hex: 0x{1:X4}",
-                        character,
-                        (int)character));
+                    $"Character mapping not found. Character: '{character}', Hex: 0x{(int)character:X4}");
 
             default:
-                result.Append(character);
-                break;
+                throw new ArgumentOutOfRangeException(
+                    nameof(unmappedCharacterBehavior),
+                    unmappedCharacterBehavior,
+                    null);
         }
     }
 }
