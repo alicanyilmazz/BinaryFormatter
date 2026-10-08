@@ -1,120 +1,193 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
+
 private static readonly Dictionary<char, char> ArabicMap =
     new Dictionary<char, char>
     {
-        // Bunlar elimizdeki örneklerden bildiklerimiz.
+        /*
+         * NDC Double Arabic mapping.
+         *
+         * Sol taraf  : Switch'ten gelen karakter
+         * Sağ taraf : Unicode Arabic karakter
+         *
+         * Dokümandaki mapping'in tamamını buraya ekle.
+         */
 
-        { '"', 'ا' },
-        { '#', 'ا' },
-        { '(', 'ت' },
-        { '8', 'ب' },
-        { '<', 'خ' },
-        { '@', 'ر' },
+        { '"',  'ا' },
+        { '#',  'ا' },
+        { '(',  'ت' },
+        { '8',  'ب' },
+        { '<',  'خ' },
+        { '@',  'ر' },
 
-        { 'I', 'ع' },
-        { 'J', 'ع' },
-        { 'K', 'غ' },
+        { 'C',  'س' },
+        { 'D',  'ش' },
+        { 'E',  'ص' },
+        { 'F',  'ض' },
+        { 'G',  'ط' },
+        { 'H',  'ظ' },
 
-        { 'U', 'ل' },
-        { 'X', 'م' },
-        { 'Z', 'ن' },
+        { 'I',  'ع' },
+        { 'J',  'ع' },
 
-        { '[', 'و' },
+        { 'K',  'غ' },
+        { 'L',  'غ' },
+
+        { 'M',  'ف' },
+
+        { 'N',  'ق' },
+        { 'O',  'ق' },
+
+        { 'P',  'ك' },
+        { 'Q',  'ك' },
+        { 'R',  'ك' },
+        { 'S',  'ك' },
+
+        { 'T',  'ل' },
+        { 'U',  'ل' },
+
+        { 'W',  'م' },
+        { 'X',  'م' },
+
+        { 'Y',  'ن' },
+        { 'Z',  'ن' },
+
+        { '[',  'و' },
+
+        // Bunları kendi dokümanındaki karşılıkla kontrol et.
         { '\\', 'ة' },
-        { '_', 'ي' },
+        { ']',  'ه' },
 
-        // ------------------------------------
-        // Dokümandaki geri kalan mappingleri
-        // buraya sen ekleyeceksin.
-        // ------------------------------------
+        { '^',  'ي' },
+        { '_',  'ي' }
 
-        // Örnek:
-        // { 'C', 'س' },
-        // { 'D', 'ش' },
-        // { 'E', 'ص' },
-        // { 'F', 'ض' },
-        // ...
+        /*
+         * Buraya fotoğraftaki diğer special-character
+         * mappinglerini de aynı şekilde ekle:
+         *
+         * { '!',  '...' },
+         * { '$',  '...' },
+         * { '%',  '...' },
+         * { '&',  '...' },
+         * { '\'', '...' },
+         * { ')',  '...' },
+         * { '*',  '...' },
+         * ...
+         */
     };
 
-    private static string ConvertArabicHeader(string rawHeader)
+
+private static string ConvertArabicHeader(string rawHeader)
 {
     if (string.IsNullOrEmpty(rawHeader))
         return rawHeader;
 
-    // NDC Arabic header visual order geliyor.
-    // Önce tamamını ters çeviriyoruz.
-    char[] chars = rawHeader.ToCharArray();
-    Array.Reverse(chars);
+    var mapped = new StringBuilder(rawHeader.Length);
 
-    var result = new StringBuilder(chars.Length);
-
-    foreach (char c in chars)
+    foreach (char character in rawHeader)
     {
-        char arabicChar;
+        char arabicCharacter;
 
-        if (ArabicMap.TryGetValue(c, out arabicChar))
+        if (ArabicMap.TryGetValue(character, out arabicCharacter))
         {
-            result.Append(arabicChar);
+            mapped.Append(arabicCharacter);
         }
         else
         {
-            // Space veya mapping'de olmayan bir şey geldiyse
-            // veri kaybolmasın, olduğu gibi bırak.
-            result.Append(c);
+            // Mapping yoksa karakteri kaybetme.
+            // Space, sayı, noktalama vb. aynen kalır.
+            mapped.Append(character);
         }
     }
 
-    return result.ToString();
+    /*
+     * NDC Double Arabic data visual order geliyor.
+     *
+     * Örnek:
+     *
+     * KU8XU"
+     *
+     * mapping sonrası:
+     *
+     * غلبملا
+     *
+     * reverse sonrası:
+     *
+     * المبلغ
+     */
+
+    char[] chars = mapped.ToString().ToCharArray();
+
+    Array.Reverse(chars);
+
+    string result = new string(chars);
+
+    /*
+     * Eğer header içerisinde sayı/date gibi LTR değerler
+     * bulunursa tüm header reverse edildiği için onlar da
+     * ters döner. Onları tekrar kendi yönüne çeviriyoruz.
+     *
+     * Örnek:
+     *
+     * 20-02-26
+     *
+     * reverse sonrası:
+     *
+     * 62-20-02
+     *
+     * RestoreNumericRuns sonrası:
+     *
+     * 20-02-26
+     */
+
+    return RestoreNumericRuns(result);
 }
 
-// Language
-string langCode = data.Substring(0, 2);
 
-bool isArabic = langCode.StartsWith(
-    "A",
-    StringComparison.OrdinalIgnoreCase);
-
-result.LanguageInfo =
-    langCode.StartsWith("E", StringComparison.OrdinalIgnoreCase)
-        ? "English"
-        : isArabic
-            ? "Arabic"
-            : "Unknown";
-
-string remaining = data.Substring(2);
-
-if (remaining.Length < LineLength)
+private static string RestoreNumericRuns(string value)
 {
-    throw Commons.Common.GenerateHostException(
-        "HeaderLengthInsufficient",
-        false);
-}
+    if (string.IsNullOrEmpty(value))
+        return value;
 
-// Header
-string rawHeader = remaining.Substring(0, LineLength);
+    char[] chars = value.ToCharArray();
 
-result.HeaderRawData = isArabic
-    ? ConvertArabicHeader(rawHeader)
-    : rawHeader;
+    int index = 0;
 
-
-// Transactions
-// Bunlara KESİNLİKLE Arabic conversion uygulanmıyor.
-
-string rowsBlock = remaining.Substring(LineLength);
-
-for (int i = 0;
-     i + LineLength <= rowsBlock.Length;
-     i += LineLength)
-{
-    string rawLine =
-        rowsBlock.Substring(i, LineLength);
-
-    if (string.IsNullOrWhiteSpace(rawLine))
-        continue;
-
-    result.Transactions.Add(
-        new OffusMiniStatementTransactions
+    while (index < chars.Length)
+    {
+        if (!char.IsDigit(chars[index]))
         {
-            RawData = rawLine
-        });
+            index++;
+            continue;
+        }
+
+        int start = index;
+
+        while (index < chars.Length &&
+               IsNumericCharacter(chars[index]))
+        {
+            index++;
+        }
+
+        int length = index - start;
+
+        if (length > 1)
+        {
+            Array.Reverse(chars, start, length);
+        }
+    }
+
+    return new string(chars);
+}
+
+
+private static bool IsNumericCharacter(char character)
+{
+    return char.IsDigit(character)
+           || character == '.'
+           || character == ','
+           || character == '-'
+           || character == '/'
+           || character == ':';
 }
