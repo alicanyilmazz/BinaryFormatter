@@ -1,15 +1,7 @@
-DECLARE @ResponseMessage VARCHAR(MAX);
-
-SELECT @ResponseMessage = RESPONSE_MESSAGE
+SELECT
+    ID,
+    DATALENGTH(RESPONSE_MESSAGE) AS SizeInBytes,
+    LEN(RESPONSE_MESSAGE) AS CharacterCount,
+    ISJSON(RESPONSE_MESSAGE) AS IsValidJson
 FROM COR.INTEGRATION_MESSAGE_LOG
-WHERE ID = 123; -- Kendi kayıt ID'n
-
-IF ISJSON(@ResponseMessage) = 1
-BEGIN
-    SELECT COUNT(*) AS TotalRecordCount
-    FROM OPENJSON(@ResponseMessage, '$.Data');
-END
-ELSE
-BEGIN
-    SELECT 'JSON geçersiz veya kesilmiş.' AS ErrorMessage;
-END
+WHERE ID IN (123, 456);
