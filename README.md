@@ -1,32 +1,32 @@
-public void MustMatchRegex(
-    string value,
-    string pattern,
-    string field,
-    string message)
-{
-    if (value == null)
-        return;
-
-    try
-    {
-        var isMatch = Regex.IsMatch(
-            value,
-            pattern,
-            RegexOptions.CultureInvariant,
-            TimeSpan.FromMilliseconds(200));
-
-        if (!isMatch)
-            Result.Add(field, message);
-    }
-    catch (RegexMatchTimeoutException)
-    {
-        Result.Add(field, message);
-    }
-}
-
 public static class ValidationRegexPatterns
 {
-    #region ASCII Patterns
+    #region ASCII Letter Patterns
+
+    // ASCII letters only
+    // Empty string is NOT allowed
+    public const string AsciiLettersOnly =
+        @"\A[A-Za-z]+\z";
+
+    // ASCII letters only
+    // Empty string is allowed
+    public const string AsciiLettersOnlyAllowEmpty =
+        @"\A[A-Za-z]*\z";
+
+
+    // ASCII letters and backslashes (\)
+    // Empty string is NOT allowed
+    public const string AsciiLettersAndBackslashes =
+        @"\A[A-Za-z\\]+\z";
+
+    // ASCII letters and backslashes (\)
+    // Empty string is allowed
+    public const string AsciiLettersAndBackslashesAllowEmpty =
+        @"\A[A-Za-z\\]*\z";
+
+    #endregion
+
+
+    #region ASCII Letters And Digits Patterns
 
     // ASCII letters and digits
     // Empty string is NOT allowed
@@ -70,7 +70,33 @@ public static class ValidationRegexPatterns
     #endregion
 
 
-    #region Unicode Patterns
+    #region Unicode Letter Patterns
+
+    // Unicode letters only
+    // Empty string is NOT allowed
+    public const string LettersOnly =
+        @"\A[\p{L}\p{M}]+\z";
+
+    // Unicode letters only
+    // Empty string is allowed
+    public const string LettersOnlyAllowEmpty =
+        @"\A[\p{L}\p{M}]*\z";
+
+
+    // Unicode letters and backslashes (\)
+    // Empty string is NOT allowed
+    public const string LettersAndBackslashes =
+        @"\A[\p{L}\p{M}\\]+\z";
+
+    // Unicode letters and backslashes (\)
+    // Empty string is allowed
+    public const string LettersAndBackslashesAllowEmpty =
+        @"\A[\p{L}\p{M}\\]*\z";
+
+    #endregion
+
+
+    #region Unicode Letters And Digits Patterns
 
     // Unicode letters, digits, hyphens (-) and underscores (_)
     // Empty string is NOT allowed
