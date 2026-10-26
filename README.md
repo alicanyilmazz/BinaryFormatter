@@ -51,6 +51,18 @@ public static class ValidationRegexPatterns
     public const string AsciiLettersDigitsAndSpaces =
         @"\A[A-Za-z0-9 ]+\z";
 
+    // ASCII letters, digits and hyphens
+    public const string AsciiLettersDigitsAndHyphens =
+        @"\A[A-Za-z0-9\-]+\z";
+
+    // ASCII letters, digits, spaces and hyphens
+    public const string AsciiLettersDigitsSpacesAndHyphens =
+        @"\A[A-Za-z0-9 \-]+\z";
+
+    // ASCII letters, digits and backslashes
+    public const string AsciiLettersDigitsAndBackslashes =
+        @"\A[A-Za-z0-9\\]+\z";
+
     #endregion
 
 
@@ -150,7 +162,7 @@ public static class ValidationRegexPatterns
     #endregion
 
 
-    #region Additional Character Combinations
+    #region Additional Character Patterns
 
     // Letters, spaces and apostrophes
     public const string LettersSpacesAndApostrophes =
@@ -168,22 +180,22 @@ public static class ValidationRegexPatterns
     public const string LettersDigitsSpacesAndSlashes =
         @"\A[\p{L}\p{M}0-9 /]+\z";
 
-    // Letters, digits and @ character
+    // Letters, digits and @ signs
     public const string LettersDigitsAndAtSigns =
         @"\A[\p{L}\p{M}0-9@]+\z";
 
-    // Letters, digits, dots and @ character
+    // Letters, digits, dots and @ signs
     public const string LettersDigitsDotsAndAtSigns =
         @"\A[\p{L}\p{M}0-9.@]+\z";
 
     // Letters, digits, spaces, commas and dots
     public const string LettersDigitsSpacesCommasAndDots =
-        @"\A[\p{L}\p{M}0-9 ,\.]+\z";
+        @"\A[\p{L}\p{M}0-9 ,.]+\z";
 
     #endregion
 
 
-    #region Numeric Format Patterns
+    #region Numeric Patterns
 
     // Optional leading plus followed by digits
     public const string DigitsWithOptionalLeadingPlus =
@@ -197,18 +209,26 @@ public static class ValidationRegexPatterns
     public const string DigitsWithOptionalLeadingSign =
         @"\A[+\-]?[0-9]+\z";
 
-    // Unsigned decimal with dot separator
+    // Digits, spaces and plus signs
+    public const string DigitsSpacesAndPlusSigns =
+        @"\A[0-9 +]+\z";
+
+    // Digits, spaces, plus signs and hyphens
+    public const string DigitsSpacesPlusSignsAndHyphens =
+        @"\A[0-9 +\-]+\z";
+
+    // Unsigned decimal
     public const string UnsignedDecimal =
         @"\A[0-9]+(?:\.[0-9]+)?\z";
 
-    // Signed decimal with dot separator
+    // Signed decimal
     public const string SignedDecimal =
         @"\A[+\-]?[0-9]+(?:\.[0-9]+)?\z";
 
     #endregion
 
 
-    #region Common Formats
+    #region Common Format Patterns
 
     // Common email address format
     public const string EmailAddress =
@@ -218,101 +238,9 @@ public static class ValidationRegexPatterns
     public const string Hexadecimal =
         @"\A[0-9A-Fa-f]+\z";
 
+    // Optional leading plus and 10-15 digits
+    public const string PhoneNumber =
+        @"\A\+?[0-9]{10,15}\z";
+
     #endregion
-}
-
-
-[Flags]
-public enum AllowedCharacterSet
-{
-    None = 0,
-
-    Letters = 1 << 0,
-
-    Digits = 1 << 1,
-
-    Spaces = 1 << 2,
-
-    Hyphens = 1 << 3,
-
-    Underscores = 1 << 4,
-
-    Dots = 1 << 5,
-
-    AtSigns = 1 << 6,
-
-    PlusSigns = 1 << 7,
-
-    Slashes = 1 << 8,
-
-    Apostrophes = 1 << 9,
-
-    Commas = 1 << 10,
-
-    Colons = 1 << 11
-}
-
-public static string Build(AllowedCharacterSet allowed)
-{
-    if (allowed == AllowedCharacterSet.None)
-        throw new ArgumentException(
-            "At least one character set must be specified.",
-            nameof(allowed));
-
-    const AllowedCharacterSet supported =
-        AllowedCharacterSet.Letters |
-        AllowedCharacterSet.Digits |
-        AllowedCharacterSet.Spaces |
-        AllowedCharacterSet.Hyphens |
-        AllowedCharacterSet.Underscores |
-        AllowedCharacterSet.Dots |
-        AllowedCharacterSet.AtSigns |
-        AllowedCharacterSet.PlusSigns |
-        AllowedCharacterSet.Slashes |
-        AllowedCharacterSet.Apostrophes |
-        AllowedCharacterSet.Commas |
-        AllowedCharacterSet.Colons;
-
-    if ((allowed & ~supported) != AllowedCharacterSet.None)
-        throw new ArgumentOutOfRangeException(nameof(allowed));
-
-    var chars = new StringBuilder();
-
-    if ((allowed & AllowedCharacterSet.Letters) != 0)
-        chars.Append(@"\p{L}\p{M}");
-
-    if ((allowed & AllowedCharacterSet.Digits) != 0)
-        chars.Append("0-9");
-
-    if ((allowed & AllowedCharacterSet.Spaces) != 0)
-        chars.Append(" ");
-
-    if ((allowed & AllowedCharacterSet.Hyphens) != 0)
-        chars.Append(@"\-");
-
-    if ((allowed & AllowedCharacterSet.Underscores) != 0)
-        chars.Append("_");
-
-    if ((allowed & AllowedCharacterSet.Dots) != 0)
-        chars.Append(@"\.");
-
-    if ((allowed & AllowedCharacterSet.AtSigns) != 0)
-        chars.Append("@");
-
-    if ((allowed & AllowedCharacterSet.PlusSigns) != 0)
-        chars.Append(@"\+");
-
-    if ((allowed & AllowedCharacterSet.Slashes) != 0)
-        chars.Append("/");
-
-    if ((allowed & AllowedCharacterSet.Apostrophes) != 0)
-        chars.Append("'");
-
-    if ((allowed & AllowedCharacterSet.Commas) != 0)
-        chars.Append(",");
-
-    if ((allowed & AllowedCharacterSet.Colons) != 0)
-        chars.Append(":");
-
-    return @"\A[" + chars + @"]+\z";
 }
